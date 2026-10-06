@@ -1,0 +1,273 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from datetime import datetime, timedelta
+
+st.set_page_config(
+    page_title="E-commerce Sales Data Pipeline and Analytics Warehouse",
+    layout="wide",
+    page_icon="✨"
+)
+
+st.markdown("""
+    <style>
+        .main-title {
+            font-size: 36px;
+            font-weight: 800;
+            color: #1a73e8;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        .sub-title {
+            font-size: 18px;
+            color: #5f6368;
+            text-align: center;
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+@st.cache_data
+def make_data():
+    np.random.seed(42)
+
+    n_customers = 250
+    cust_ids = [f"CUST-{i:04d}" for i in range(1, n_customers + 1)]
+
+    indian_first_names = [
+        'Aarav', 'Vihaan', 'Vivaan', 'Ananya', 'Diya', 'Aditya', 'Ishaan', 'Sai',
+        'Kavya', 'Arjun', 'Krishna', 'Pranav', 'Rohan', 'Sneha', 'Pooja',
+        'Rahul', 'Nikhil', 'Tanvi', 'Anjali', 'Meera'
+    ]
+    indian_last_names = [
+        'Sharma', 'Patel', 'Iyer', 'Sen', 'Reddy', 'Mehta', 'Joshi', 'Nair',
+        'Rao', 'Singh', 'Kumar', 'Gupta', 'Verma', 'Das', 'Choudhury',
+        'Banerjee', 'Pillai', 'Naidu', 'Shah', 'Bose'
+    ]
+
+    customer_names = [
+        f"{np.random.choice(indian_first_names)} {np.random.choice(indian_last_names)}"
+        for _ in range(n_customers)
+    ]
+
+    raw_customers = pd.DataFrame({
+        'customer_id': cust_ids,
+        'customer_name': customer_names,
+        'email': [
+            f"{name.lower().replace(' ', '')}@gmail.in" if np.random.rand() > 0.05 else np.nan
+            for name in customer_names
+        ],
+        'country': np.random.choice(
+            ['Maharashtra', 'Karnataka', 'Delhi NCR', 'Tamil Nadu', 'West Bengal', 'Telangana'],
+            size=n_customers,
+            p=[0.35, 0.20, 0.15, 0.12, 0.10, 0.08]
+        ),
+        'signup_date': [
+            datetime(2023, 1, 1) + timedelta(days=int(np.random.randint(0, 365)))
+            for _ in range(n_customers)
+        ]
+    })
+
+    categories = ['Electronics', 'Clothing', 'Home & Kitchen', 'Books', 'Beauty']
+    product_names = {
+        'Electronics': ['OnePlus Smartphone', 'boAt Wireless Earbuds', 'Noise Smart Watch', 'Lenovo Tablet', 'Mi Smart TV'],
+        'Clothing': ['FabIndia Kurta', 'Khadi Jacket', 'Cotton Saree', 'Jeans', 'Silk Dupatta'],
+        'Home & Kitchen': ['Prestige Mixer', 'Pigeon Coffee Maker', 'Kent Air Purifier', 'Hawkins Cooker', 'Clay Dinnerware Set'],
+        'Books': ['The Guide by R.K. Narayan', 'Train to Pakistan', 'The Palace of Illusions', 'Wings of Fire', 'Indian Home Kitchen Cookbook'],
+        'Beauty': ['Forest Essentials Oil', 'Mamaearth Sunscreen', 'Kama Ayurveda Cleanser', 'Biotique Shampoo', 'Lakme Lipstick']
+    }
+
+    raw_products = []
+    prod_counter = 1
+    for cat in categories:
+        for p_name in product_names[cat]:
+            base_price = np.random.uniform(8000, 45000) if cat == 'Electronics' else np.random.uniform(400, 3500)
+            raw_products.append({
+                'product_id': f"PROD-{prod_counter:03d}",
+                'product_name': p_name,
+                'category': cat,
+                'price': round(base_price, 2)
+            })
+            prod_counter += 1
+
+    raw_products = pd.DataFrame(raw_products)
+    raw_products.loc[0, 'price'] = -500.00
+
+    n_orders = 1000
+    order_ids = [f"ORD-{i:05d}" for i in range(1, n_orders + 1)]
+    start_date = datetime(2024, 1, 1)
+    order_dates = [start_date + timedelta(days=int(np.random.randint(0, 300))) for _ in range(n_orders)]
+    order_customers = np.random.choice(cust_ids, size=n_orders)
+
+    raw_orders = pd.DataFrame({
+        'order_id': order_ids,
+        'customer_id': order_customers,
+        'order_date': order_dates,
+        'status': np.random.choice(
+            ['Completed', 'Shipped', 'Processing', 'Cancelled'],
+            size=n_orders,
+            p=[0.75, 0.12, 0.08, 0.05]
+        )
+    })
+
+    raw_order_items = []
+    for ord_id in order_ids:
+        n_items = np.random.randint(1, 4)
+        chosen_prods = raw_products.sample(n=n_items)
+        for _, row in chosen_prods.iterrows():
+            raw_order_items.append({
+                'order_id': ord_id,
+                'product_id': row['product_id'],
+                'quantity': int(np.random.choice([1, 2, 3], p=[0.7, 0.2, 0.1])),
+                'unit_price': row['price']
+            })
+
+    raw_order_items = pd.DataFrame(raw_order_items)
+
+    clean_customers = raw_customers.copy()
+    clean_customers['email'] = clean_customers['email'].fillna('unknown@example.com')
+
+    clean_products = raw_products.copy()
+    median_electronics_price = clean_products[clean_products['category'] == 'Electronics']['price'].median()
+    clean_products.loc[clean_products['price'] < 0, 'price'] = median_electronics_price
+
+    all_dates = pd.date_range(start='2023-01-01', end='2024-12-31', freq='D')
+    dim_dates = pd.DataFrame({
+        'date_key': all_dates.strftime('%Y%m%d').astype(int),
+        'full_date': all_dates,
+        'year': all_dates.year,
+        'quarter': all_dates.quarter,
+        'month': all_dates.month,
+        'month_name': all_dates.strftime('%B'),
+        'day': all_dates.day,
+        'day_of_week': all_dates.dayofweek,
+        'day_name': all_dates.strftime('%A'),
+        'is_weekend': all_dates.dayofweek.isin([5, 6]).astype(int)
+    })
+
+    fact_sales_raw = raw_order_items.merge(raw_orders, on='order_id', how='inner')
+    fact_sales_raw = fact_sales_raw.merge(clean_products, on='product_id', how='inner', suffixes=('', '_dim'))
+    fact_sales_raw['unit_price'] = np.where(fact_sales_raw['unit_price'] < 0, fact_sales_raw['price'], fact_sales_raw['unit_price'])
+    fact_sales_raw['gross_amount'] = fact_sales_raw['quantity'] * fact_sales_raw['unit_price']
+    fact_sales_raw['date_key'] = pd.to_datetime(fact_sales_raw['order_date']).dt.strftime('%Y%m%d').astype(int)
+
+    fact_sales = fact_sales_raw[
+        ['order_id', 'customer_id', 'product_id', 'date_key', 'quantity', 'unit_price', 'gross_amount', 'status']
+    ].copy()
+
+    return clean_customers, clean_products, dim_dates, fact_sales
+
+dim_customers, dim_products, dim_dates, fact_sales = make_data()
+
+st.markdown('<div class="main-title">E-commerce Sales Data Pipeline and Analytics Warehouse</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Live Interactive Star-Schema Analytics Warehouse Engine</div>', unsafe_allow_html=True)
+
+st.sidebar.header("🌐 Geographic & Category Filters")
+states = ['All Regions'] + list(dim_customers['country'].unique())
+selected_state = st.sidebar.selectbox("Choose Indian State/Region", states)
+
+categories_list = ['All Categories'] + list(dim_products['category'].unique())
+selected_category = st.sidebar.selectbox("Filter Product Category", categories_list)
+
+filtered_fact = fact_sales.copy()
+
+if selected_state != 'All Regions':
+    filtered_cust = dim_customers[dim_customers['country'] == selected_state]
+    filtered_fact = filtered_fact[filtered_fact['customer_id'].isin(filtered_cust['customer_id'])]
+
+if selected_category != 'All Categories':
+    filtered_prod = dim_products[dim_products['category'] == selected_category]
+    filtered_fact = filtered_fact[filtered_fact['product_id'].isin(filtered_prod['product_id'])]
+
+non_cancelled = filtered_fact[filtered_fact['status'] != 'Cancelled']
+total_rev = non_cancelled['gross_amount'].sum()
+total_orders = filtered_fact['order_id'].nunique()
+aov = total_rev / total_orders if total_orders else 0
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Revenue (INR)", f"₹ {total_rev:,.2f}")
+with col2:
+    st.metric("Total Orders", f"{total_orders:,}")
+with col3:
+    st.metric("Average Ticket Size", f"₹ {aov:,.2f}")
+
+tab1, tab2, tab3 = st.tabs(["📈 Executive Analytics Dashboard", "📂 Active Database Explorer", "⚙️ Pipeline Insights"])
+
+with tab1:
+    r1_col1, r1_col2 = st.columns(2)
+
+    with r1_col1:
+        cat_rev = (
+            filtered_fact.merge(dim_products, on='product_id')
+            .groupby('category', as_index=False)['gross_amount'].sum()
+        )
+        fig_cat = px.bar(
+            cat_rev, x='gross_amount', y='category', orientation='h',
+            title="Sales Volume by Product Category (INR)",
+            color='category',
+            color_discrete_sequence=px.colors.qualitative.Prism,
+            labels={'gross_amount': 'Revenue (₹)', 'category': 'Category'}
+        )
+        fig_cat.update_layout(showlegend=False)
+        st.plotly_chart(fig_cat, use_container_width=True)
+
+    with r1_col2:
+        status_df = filtered_fact['status'].value_counts().reset_index()
+        status_df.columns = ['status', 'count']
+        fig_status = px.pie(
+            status_df, values='count', names='status',
+            title="Order Fulfillment Distribution", hole=0.4,
+            color_discrete_sequence=px.colors.sequential.Sunset_r
+        )
+        st.plotly_chart(fig_status, use_container_width=True)
+
+    r2_col1, r2_col2 = st.columns(2)
+
+    with r2_col1:
+        country_df = (
+            filtered_fact.merge(dim_customers, on='customer_id')
+            .groupby('country', as_index=False)['gross_amount'].sum()
+            .sort_values('gross_amount', ascending=False)
+        )
+        fig_country = px.bar(
+            country_df, x='country', y='gross_amount',
+            title="Market Valuation by Indian State", color='country',
+            color_discrete_sequence=px.colors.qualitative.Safe,
+            labels={'gross_amount': 'Sales (₹)', 'country': 'State'}
+        )
+        fig_country.update_layout(showlegend=False)
+        st.plotly_chart(fig_country, use_container_width=True)
+
+    with r2_col2:
+        day_df = (
+            filtered_fact.merge(dim_dates, on='date_key')
+            .groupby(['day_name', 'day_of_week'], as_index=False)['gross_amount'].mean()
+            .sort_values('day_of_week')
+        )
+        fig_day = px.line(
+            day_df, x='day_name', y='gross_amount', markers=True,
+            title="Average Ticket Size by Day of Week",
+            color_discrete_sequence=['#128807'],
+            labels={'gross_amount': 'Average Transaction (₹)', 'day_name': 'Day'}
+        )
+        st.plotly_chart(fig_day, use_container_width=True)
+
+with tab2:
+    selected_table = st.selectbox("Select Warehouse Table:", ["dim_customers", "dim_products", "dim_dates", "fact_sales"])
+    if selected_table == "dim_customers":
+        st.dataframe(dim_customers.rename(columns={'country': 'State/Region'}), use_container_width=True)
+    elif selected_table == "dim_products":
+        st.dataframe(dim_products, use_container_width=True)
+    elif selected_table == "dim_dates":
+        st.dataframe(dim_dates, use_container_width=True)
+    else:
+        st.dataframe(filtered_fact, use_container_width=True)
+
+with tab3:
+    st.success("Raw Transaction Log Ingestion Complete: Standardized 1,000 Sales Orders from Indian Regions.")
+    st.success("Dimensional Normalization Complete: Star Schema successfully populated.")
+    st.success("Anomaly Cleansed: Negative values handled; localized transaction metrics computed successfully.")
+
